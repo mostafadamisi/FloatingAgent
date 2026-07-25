@@ -227,8 +227,8 @@ XML tool-call format is also supported:
 
 ## Links
 
-- [LinkedIn Post](https://linkedin.com/in/YOUR_LINKEDIN) <!-- update this -->
-- [Report a bug](https://github.com/YOUR_USERNAME/FloatingAgent/issues)
+- [LinkedIn Post](https://linkedin.com/in/mustafa-al-damisi-7813a9352) <!-- update this -->
+- [Report a bug](https://github.com/mostafadamisi/FloatingAgent/issues)
 
 ---
 
