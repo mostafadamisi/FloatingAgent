@@ -46,7 +46,7 @@ Agent: [LAUNCH "chrome"] [WAIT 3000]
 ### 1. Clone
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/FloatingAgent.git
+git clone https://github.com/mostafadamisi/FloatingAgent.git
 cd FloatingAgent
 ```
 
