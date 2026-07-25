@@ -1,0 +1,317 @@
+@namespace FloatingAgent.Blazor
+@implements IDisposable
+@using System.IO
+@using System.Text.Json
+@using FloatingAgent.Models
+
+<div class="settings-page">
+    <div class="settings-header">
+        <button class="back-btn" @onclick="GoBack">← Back</button>
+        <span class="settings-title">Settings</span>
+        <div></div>
+    </div>
+
+    <div class="settings-body">
+        <div class="section">
+            <div class="sect-title">Provider</div>
+
+            <div class="provider-grid">
+                @foreach (var p in ProviderInfo.All)
+                {
+                    <div class="pcard @(config.Provider == p.Name ? "active" : "")"
+                         @onclick="() => SelectProvider(p)">
+                        <div class="pname">@p.Name</div>
+                        <div class="pnote">@p.Note</div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="sect-title">API Configuration</div>
+
+            <label class="sfield">
+                <span>API URL</span>
+                <input type="text" @bind="config.OpenCodeApiUrl" placeholder="https://opencode.ai/zen/v1" />
+            </label>
+
+            <label class="sfield">
+                <span>API Key</span>
+                <div class="key-wrap">
+                    <input type="@(_showKey ? "text" : "password")" @bind="config.ApiKey" placeholder="sk-..." />
+                    <button class="toggle-key" @onclick="ToggleKey">@(_showKey ? "Hide" : "Show")</button>
+                </div>
+            </label>
+
+            <label class="sfield">
+                <span>Model</span>
+                <div class="model-wrap">
+                    <input type="text" class="model-input" @bind="config.Model"
+                           placeholder="@(_availableModels.Count > 0 ? "Type or select from list..." : "Enter model name...")" />
+                    <button class="refresh-models" @onclick="FetchModels" disabled="@_fetchingModels" title="Refresh models">⟳</button>
+                </div>
+                @if (_availableModels.Count > 0)
+                {
+                    <div class="model-picker">
+                        <select class="model-select" @onchange="OnModelPick" size="6">
+                            @foreach (var m in _availableModels)
+                            {
+                                <option value="@m" selected="@(config.Model == m)">@m</option>
+                            }
+                        </select>
+                        <span class="model-count">@_availableModels.Count models</span>
+                    </div>
+                }
+                else if (!_fetchingModels)
+                {
+                    <span class="model-count dim">No models fetched — press ⟳ or type manually</span>
+                }
+            </label>
+        </div>
+
+        <div class="section">
+            <div class="sect-title">Behavior</div>
+
+            <label class="stoggle">
+                <input type="checkbox" @bind="config.Topmost" />
+                <span>Always on top</span>
+            </label>
+
+            <label class="stoggle">
+                <input type="checkbox" @bind="config.AutoMinimize" />
+                <span>Auto-minimize to bubble during tasks</span>
+            </label>
+        </div>
+
+        <div class="section actions">
+            <button class="save-btn" @onclick="SaveConfig">Save</button>
+            <button class="test-btn" @onclick="TestConnection" disabled="@_testing">@(_testing ? "Testing..." : "Test")</button>
+            <span class="save-msg">@statusMsg</span>
+        </div>
+
+        @if (_testResult != null)
+        {
+            <div class="test-result @(_testResult.IsError ? "error" : "ok")">
+                <div class="tr-head">@(_testResult.IsError ? "✗" : "✓") @_testResult.Title</div>
+                <div class="tr-body">@_testResult.Detail</div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private AppConfig config = new();
+    private bool _showKey;
+    private string statusMsg = "";
+
+    [Inject] private FloatingAgent.Services.BlazorBridge Bridge { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        LoadConfig();
+        _ = FetchModels();
+    }
+
+    private void LoadConfig()
+    {
+        var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
+        if (File.Exists(path))
+        {
+            try
+            {
+                var json = File.ReadAllText(path);
+                config = JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
+            }
+            catch { config = new AppConfig(); }
+        }
+    }
+
+    private List<string> _availableModels = new();
+    private bool _fetchingModels;
+
+    private async Task FetchModels()
+    {
+        if (string.IsNullOrWhiteSpace(config.OpenCodeApiUrl)) return;
+        _fetchingModels = true;
+        _availableModels.Clear();
+        StateHasChanged();
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            var baseUrl = config.OpenCodeApiUrl.TrimEnd('/');
+            if (!string.IsNullOrEmpty(config.ApiKey))
+                http.DefaultRequestHeaders.Add("Authorization", $"Bearer {config.ApiKey}");
+
+            var resp = await http.GetAsync($"{baseUrl}/models");
+            if (!resp.IsSuccessStatusCode) { _fetchingModels = false; StateHasChanged(); return; }
+
+            var raw = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(raw);
+
+            if (doc.RootElement.TryGetProperty("data", out var data))
+            {
+                foreach (var item in data.EnumerateArray())
+                {
+                    if (item.TryGetProperty("id", out var id))
+                    {
+                        var name = id.GetString();
+                        if (!string.IsNullOrEmpty(name))
+                            _availableModels.Add(name);
+                    }
+                }
+            }
+        }
+        catch { }
+
+        _fetchingModels = false;
+        StateHasChanged();
+    }
+
+    private class TestResult
+    {
+        public bool IsError { get; set; }
+        public string Title { get; set; } = "";
+        public string Detail { get; set; } = "";
+    }
+    private TestResult? _testResult;
+    private bool _testing;
+
+    private async Task TestConnection()
+    {
+        if (string.IsNullOrWhiteSpace(config.OpenCodeApiUrl))
+        {
+            _testResult = new TestResult { IsError = true, Title = "Missing URL", Detail = "Enter an API URL first." };
+            StateHasChanged(); return;
+        }
+        if (string.IsNullOrWhiteSpace(config.Model))
+        {
+            _testResult = new TestResult { IsError = true, Title = "Missing Model", Detail = "Enter a model name first." };
+            StateHasChanged(); return;
+        }
+
+        _testing = true;
+        _testResult = null;
+        statusMsg = "Testing...";
+        StateHasChanged();
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            var baseUrl = config.OpenCodeApiUrl.TrimEnd('/');
+            if (!string.IsNullOrEmpty(config.ApiKey))
+                http.DefaultRequestHeaders.Add("Authorization", $"Bearer {config.ApiKey}");
+
+            var body = new
+            {
+                model = config.Model,
+                messages = new[] { new { role = "user", content = "Reply with exactly: OK" } },
+                max_tokens = 10
+            };
+            var json = JsonSerializer.Serialize(body);
+            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var response = await http.PostAsync($"{baseUrl}/chat/completions", content);
+            var raw = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = JsonDocument.Parse(raw);
+                var model = "";
+                if (doc.RootElement.TryGetProperty("model", out var m))
+                    model = m.GetString() ?? "";
+                var reply = "";
+                if (doc.RootElement.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+                {
+                    var msg = choices[0].GetProperty("message");
+                    if (msg.TryGetProperty("content", out var c))
+                        reply = (c.GetString() ?? "").Trim();
+                }
+
+                _testResult = new TestResult
+                {
+                    IsError = false,
+                    Title = $"Connected — {model}",
+                    Detail = $"Reply: \"{reply}\""
+                };
+                statusMsg = "✓ API works";
+            }
+            else
+            {
+                _testResult = new TestResult
+                {
+                    IsError = true,
+                    Title = $"HTTP {(int)response.StatusCode}",
+                    Detail = Truncate(raw, 300)
+                };
+                statusMsg = "✗ Connection failed";
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            _testResult = new TestResult { IsError = true, Title = "Timeout", Detail = "No response in 15s — check URL or network." };
+            statusMsg = "✗ Timeout";
+        }
+        catch (Exception ex)
+        {
+            _testResult = new TestResult { IsError = true, Title = "Error", Detail = ex.Message };
+            statusMsg = "✗ Error";
+        }
+
+        _testing = false;
+        StateHasChanged();
+    }
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "...";
+
+    private async Task SaveConfig()
+    {
+        if (string.IsNullOrWhiteSpace(config.OpenCodeApiUrl))
+        {
+            statusMsg = "API URL is required";
+            StateHasChanged();
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(config.Model))
+        {
+            statusMsg = "Model name is required";
+            StateHasChanged();
+            return;
+        }
+
+        statusMsg = "Saving...";
+        StateHasChanged();
+        await Task.Delay(50);
+
+        var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
+        try
+        {
+            var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(path, json);
+            Bridge.ApplyConfig(config);
+            statusMsg = "✓ Saved — model active now";
+        }
+        catch (Exception ex) { statusMsg = $"✗ {ex.Message}"; }
+        StateHasChanged();
+    }
+
+    private void OnModelPick(ChangeEventArgs e)
+    {
+        var val = e.Value?.ToString();
+        if (!string.IsNullOrEmpty(val)) config.Model = val;
+    }
+
+    private void SelectProvider(ProviderInfo p)
+    {
+        config.Provider = p.Name;
+        config.OpenCodeApiUrl = p.BaseUrl;
+        config.Model = p.DefaultModel;
+        if (!p.RequiresKey) config.ApiKey = "";
+        _ = FetchModels();
+    }
+
+    private void ToggleKey() { _showKey = !_showKey; }
+
+    private void GoBack() => Bridge.ShowChat();
+
+    public void Dispose() { }
+}

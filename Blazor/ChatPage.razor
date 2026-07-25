@@ -1,0 +1,161 @@
+@namespace FloatingAgent.Blazor
+@implements IDisposable
+@using Microsoft.JSInterop
+@using FloatingAgent.Models
+@inject IJSRuntime JS
+
+@if (Bridge.ShowSettings)
+{
+    <SettingsPage />
+}
+else
+{
+    <div class="app-container">
+        <div class="header">
+            <div class="header-left">
+                <div class="avatar">AI</div>
+                <div class="title-group">
+                    <span class="title">Floating Agent</span>
+                    <span class="model-badge">@Bridge.CurrentProvider · @Bridge.CurrentModel</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="hdr-btn" @onclick="OpenSettings" title="Settings">⚙</button>
+                <button class="hdr-btn" @onclick="CopyChat" title="Copy conversation">Copy</button>
+                <button class="hdr-btn stop @(Bridge.IsExecuting ? "visible" : "")" @onclick="StopAgent">Stop</button>
+                <button class="hdr-btn" @onclick="Minimize" title="Minimize">─</button>
+                <button class="hdr-btn" @onclick="Close" title="Close">✕</button>
+            </div>
+        </div>
+
+        <div class="messages" id="msgContainer">
+            @foreach (var msg in Bridge.Messages)
+            {
+                @if (msg.IsImage)
+                {
+                    <div class="msg screenshot @(msg.ImageExpanded ? "expanded" : "")"
+                         @onclick="() => ToggleImage(msg)">
+                        @if (msg.ImageExpanded)
+                        {
+                            <img src="data:image/png;base64,@msg.ImageBase64" alt="screenshot" />
+                        }
+                        else
+                        {
+                            <span class="shot-icon">📷</span>
+                        }
+                    </div>
+                }
+                else if (msg.Role == "action")
+                {
+                    <div class="msg action">
+                        @if (!string.IsNullOrEmpty(msg.ActionIcon))
+                        {
+                            <span class="aicon">@msg.ActionIcon</span>
+                        }
+                        <span>@msg.Content</span>
+                    </div>
+                }
+                else
+                {
+                    <div class="msg @msg.CssClass">@msg.Content</div>
+                }
+            }
+            @if (Bridge.IsExecuting)
+            {
+                <div class="typing-indicator">
+                    <span></span><span></span><span></span>
+                </div>
+            }
+        </div>
+
+        <div class="input-area">
+            <button class="screen-btn" @onclick="SendScreenshot" title="Send screenshot to agent">S</button>
+            <div class="input-wrap">
+                <input type="text" @bind="inputText" @onkeydown="HandleKey"
+                       placeholder="Type a message..."
+                       disabled="@Bridge.IsExecuting" />
+            </div>
+            <button class="send-btn @(Bridge.IsExecuting ? "loading" : "")"
+                    disabled="@(string.IsNullOrEmpty(inputText) || Bridge.IsExecuting)"
+                    @onclick="SendMessage">
+                <span class="spinner"></span>
+                <span class="label">Send</span>
+            </button>
+        </div>
+
+    @if (Bridge.CameraFlash)
+    {
+        <div class="camera-flash"></div>
+    }
+
+    @if (Bridge.ShowMinimizePrompt)
+    {
+        <div class="prompt-overlay">
+            <div class="prompt-box">
+                <div class="prompt-text">Minimize to bubble while task runs?</div>
+                <div class="prompt-btns">
+                    <button class="prompt-yes" @onclick="ConfirmMinimize">Yes</button>
+                    <button class="prompt-no" @onclick="CancelMinimize">No, stay visible</button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+}
+
+@code {
+    private string inputText = "";
+
+    [Inject] private FloatingAgent.Services.BlazorBridge Bridge { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        Bridge.OnStateChanged += StateHasChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await JS.InvokeVoidAsync("autoScroll.scroll", "msgContainer");
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(inputText) || Bridge.IsExecuting) return;
+        var text = inputText;
+        inputText = "";
+        await Bridge.HandleUserMessage(text);
+    }
+
+    private async Task SendScreenshot()
+    {
+        if (Bridge.IsExecuting) return;
+        await Bridge.HandleScreenshot();
+    }
+
+    private async Task HandleKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SendMessage();
+    }
+
+    private void ToggleImage(ChatMessageModel msg)
+    {
+        msg.ImageExpanded = !msg.ImageExpanded;
+        Bridge.NotifyState();
+    }
+
+    private void OpenSettings()
+    {
+        Bridge.ShowSettings = true;
+        Bridge.NotifyState();
+    }
+
+    private void ConfirmMinimize() => Bridge.ConfirmMinimize();
+    private void CancelMinimize() => Bridge.CancelMinimize();
+
+    private void StopAgent() => Bridge.StopAgent();
+    private void Minimize() => Bridge.Minimize();
+    private void Close() => Bridge.Close();
+    private void CopyChat() => Bridge.CopyChat();
+
+    public void Dispose() => Bridge.OnStateChanged -= StateHasChanged;
+}

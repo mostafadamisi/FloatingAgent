@@ -1,0 +1,49 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+packages/
+*.nupkg
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## Visual Studio
+.vs/
+*.sln.ide/
+*.opendb
+*.VC.db
+*.VC.opendb
+
+## JetBrains Rider
+.idea/
+*.sln.iml
+
+## Config files with secrets
+appsettings.json
+
+## OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+## Crash logs
+crash.log
+
+## Publish output
+publish/
